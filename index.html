@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baku Once Upon Time</title>
+  <style>
+    :root{
+      --ink:#111827; --muted:#6b7280; --ring:#93c5fd;
+      --chip:#f3f4f6; --card:#ffffff; --bg:#ffffff;
+    }
+    *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+    html,body{margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+
+    /* Yalnız mobil üçün layout */
+    .app{
+      display:flex; flex-direction:column;
+      min-height:100dvh; max-width:600px; margin:0 auto;
+    }
+    header{
+      padding:10px 12px 6px; text-align:center;
+    }
+    header h1{
+      margin:0; font-size:18px; font-weight:700;
+    }
+    header p.sub{
+      margin:4px 0 0; font-size:13px; color:#374151;
+    }
+
+    /* Xəritə sahəsi (şəkil contain, markerlər üstündə) */
+    .map{
+      position:relative;
+      width:100%;
+      /* Hündürlüyü JS-də başlığın hündürlüyünə görə dinamik hesablayırıq */
+      height:60dvh; /* ilk render üçün təxmini; init() bunu düzəldir */
+      overflow:hidden;
+      background:#fff;
+      border-top:1px solid #eee;
+      border-bottom:1px solid #eee;
+    }
+    .map img.bg{
+      position:absolute; inset:0; width:100%; height:100%; object-fit:contain; z-index:0; user-select:none; pointer-events:none;
+    }
+    .pins{ position:absolute; inset:0; z-index:1; }
+
+    .pin{
+      position:absolute;
+      width:36px; height:36px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background:#111; color:#f5d7b5; font-size:14px; font-weight:700;
+      box-shadow:0 6px 16px rgba(0,0,0,.18);
+      /* mərkəzləndirmə: verilən koordinatı dairənin mərkəzinə gətir */
+      transform:translate(-50%,-50%);
+    }
+    .pin.active{ outline:3px solid var(--ring); background:#000; color:#fff; }
+
+    /* Kontent kartı */
+    .content{
+      padding:10px 12px 16px;
+    }
+    .card{
+      display:none;
+      background:var(--card); border:1px solid #e5e7eb; border-radius:12px; padding:12px;
+    }
+    .card.active{ display:block; }
+    .card h2{ margin:0 0 8px; font-size:16px; }
+    .card img.media{ width:100%; height:auto; display:block; border-radius:10px; }
+
+    .footer-note{
+      margin-top:10px; font-size:12px; color:var(--muted); text-align:center;
+    }
+
+    /* Ekranlara uyğunlaşma: daha kiçik telefonlarda pin ölçüsü azalır */
+    @media (max-width:420px){
+      .pin{ width:32px; height:32px; font-size:13px; }
+      header h1{ font-size:17px; }
+      header p.sub{ font-size:12px; }
+    }
+    @media (max-width:340px){
+      .pin{ width:28px; height:28px; font-size:12px; }
+    }
+
+    /* Masaüstündə xəbərdarlıq (mobil fokus) */
+    @media (min-width:901px){
+      .desktop-warning{
+        display:block; text-align:center; background:#fff7ed; color:#9a3412;
+        padding:8px 10px; font-size:13px; border-bottom:1px solid #fed7aa;
+      }
+    }
+    @media (max-width:900px){
+      .desktop-warning{ display:none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- <div class="desktop-warning">Bu səhifənin mobil versiyasını görürsünüz. Ən yaxşı təcrübə üçün telefonda açın.</div> -->
+
+  <div class="app">
+    <header id="appHeader">
+      <h1>Baku: Once Upon a Time</h1>
+      <!-- <p class="sub">Rəqəmlərə toxunaraq məlumatı açın</p> -->
+    </header>
+
+    <section class="map" id="mapBox">
+      <img src="./assets/background.jpg" alt="Xəritə" class="bg" id="bgImg" />
+      <div class="pins" id="pins"></div>
+    </section>
+
+    <section class="content">
+      <article class="card" id="card"></article>
+      <p class="footer-note">Qeyd: Xəritə tam görünür; markerlər ekran ölçüsünə uyğun avtomatik yerləşdirilir.</p>
+    </section>
+  </div>
+
+  <script>
+    // ----- Məlumatlar (8 bölmə) -----
+    const ITEMS = [
+      {title:"Baku Children’s Railway", html:`<img src="./assets/1.png" alt="1" class="media"><p>Baku Children’s Railway (BUDY) was a children’s railway that operated in Baku from 1947 to 2009. Its opening ceremony was held on August 10, 1947. The railway was 1,050 meters long and consisted of two stations — Dədə Qorqud and Bahar, a locomotive depot, a training building, 2 TU2 diesel locomotives, and 6 Pafawag carriages. It was located in the park named after Shahriyar. Since 2004, its official name had been Azerbaijan State Children’s Railway (ADUDY)</p>`},
+      {title:"Baku Children’s Railway", html:`<img src="./assets/2.png" alt="2" class="media"><p>In the early 1990s, attention to the Baku Children’s Railway (BUDY) declined. BUDY was removed from the list of the Azerbaijan State Railways (ADDY). However, starting from January 2002, renewed attention was given to the Baku Children’s Railway. In June 2009, the Baku Children’s Railway was dismantled. Initially, it was announced that these works were related to reconstruction. Later, it was stated that the children’s railway would be reopened in Ganja. However, since then, no information has been provided regarding the restoration of the railway.</p>`},
+      {title:"Montin Park", html:`<img src="./assets/3.png" alt="3" class="media"><p>The southern arc-shaped boundary of Montin was the railway. Along this railway, a large forest park area had been created. The main entrance to the park was located near the Montin market and the district polyclinic. On both sides, the ceremonial white gates were decorated with mosaics depicting folk musicians and dancers.</p>`},
+      {title:"Montin Park", html:`<img src="./assets/4.png" alt="4" class="media"><p>Later, the area of Montin Park was significantly reduced. The park was enclosed with numerous fences. The old park was renamed after Azerbaijan’s National Hero, Samir Khasiyev.</p>`},
+      {title:"Karabakh Hotel", html:`<img src="./assets/5.png" alt="5" class="media"><p>Karabakh Hotel — The hotel building was constructed in 1974. Its architects were B. Shulgin and E. Melkhisedekov, and the structural engineers were K. Karimov and G. Shamilov. Until 1989, the hotel was called “Tourist”, after which it was renamed “Karabakh.” Built on a rocky hill, the Karabakh was included in the Encyclopedia of World Architecture published in New York in 1978. In 1979, the building’s design was awarded the Le Corbusier Prize.</p>`},
+      {title:"Karabakh Hotel", html:`<img src="./assets/6.png" alt="6" class="media"><p>In 2004, the company Uğur 97 purchased the building of the Karabakh Hotel. At first, the building was demolished down to the first floor, but later, for unknown reasons, the demolition works were stopped. For a while, the hotel area functioned as a paid parking lot, and afterwards, it was completely demolished. Today, the site where the hotel once stood remains empty.</p>`},
+      {title:"The Haji Farajulla Hammam", html:`<img src="./assets/7.png" alt="7" class="media"><p>This building, designed by architect Mashadi Gasim Izmayilov, was constructed in 1888 as the Haji Farajulla Hammam (bathhouse). It was a historical monument of local significance.</p>`},
+      {title:"The Haji Farajulla Hammam", html:`<img src="./assets/8.png" alt="8" class="media"><p>Later, the hammam became the building of the Azerbaijan State Yugh Theatre. On May 18, 2016, the hamam was removed from the list of historical monuments, and shortly afterwards it was demolished. At present, the Yugh Theatre operates in the small hall of the Puppet Theatre building.</p>`},
+    ];
+
+    /*
+      Marker koordinatları — ŞƏKİLİN ORİJİNAL ÖLÇÜSÜNƏ GÖRƏ (px).
+      Əgər hazırda səndə faizlədirsə, rahatlıq üçün aşağıdakı helper
+      onları avtomatik pikselə çevirəcək. İstəsən birbaşa {x,y} yaz.
+      Aşağıdakı faiz dəyərləri nümunə kimidir — öz xəritənə görə dəyiş.
+    */
+    const positionsPercent = [
+      {top:'12%', left:'55%'},
+      {top:'18%', left:'35%'},
+      {top:'8%',  left:'82%'},
+      {top:'28%', left:'78%'},
+      {top:'50%', left:'62%'},
+      {top:'68%', left:'52%'},
+      {top:'30%', left:'22%'},
+      {top:'58%', left:'18%'}
+    ];
+
+    const mapBox = document.getElementById('mapBox');
+    const pinsEl = document.getElementById('pins');
+    const card = document.getElementById('card');
+    const bgImg = document.getElementById('bgImg');
+    const appHeader = document.getElementById('appHeader');
+
+    let natW = 0, natH = 0;      // şəkilin orijinal ölçüsü
+    let positionsPx = [];        // {x, y} — orijinal ölçüyə görə
+
+    // Başlıq hündürlüyünə görə xəritənin real hündürlüyünü hesabla
+    function fitMapHeight(){
+      const headerH = appHeader.offsetHeight || 0;
+      // minimal kontent sahəsi də qalsın deyə 56px buffer
+      const h = Math.max(320, window.innerHeight - headerH - 56);
+      mapBox.style.height = `${h}px`;
+    }
+
+    // Şəklin orijinal ölçüsünü oxu
+    function ensureImageSize(){
+      return new Promise((resolve)=>{
+        if(bgImg.naturalWidth){
+          natW = bgImg.naturalWidth; natH = bgImg.naturalHeight; resolve();
+        }else{
+          const tmp = new Image();
+          tmp.src = bgImg.src;
+          tmp.onload = ()=>{ natW = tmp.naturalWidth; natH = tmp.naturalHeight; resolve(); };
+        }
+      });
+    }
+
+    // Faizi pikselə çevir
+    function pctToPx(){
+      positionsPx = positionsPercent.map(p=>{
+        const t = parseFloat(String(p.top).replace('%',''))/100;
+        const l = parseFloat(String(p.left).replace('%',''))/100;
+        return { x: Math.round(natW*l), y: Math.round(natH*t) };
+      });
+    }
+
+    // Markerləri çək (contain + ofset + skala)
+    function renderPins(){
+      const wrap = mapBox.getBoundingClientRect();
+      const img = bgImg.getBoundingClientRect();
+
+      const scale = natW ? (img.width / natW) : 1; // contain üçün eyni
+      const offX  = img.left - wrap.left;
+      const offY  = img.top  - wrap.top;
+
+      pinsEl.innerHTML = positionsPx.map((p,i)=>{
+        const x = offX + p.x * scale;
+        const y = offY + p.y * scale;
+        return `<button class="pin" style="left:${x}px; top:${y}px" data-id="${i+1}" aria-label="Bölmə ${i+1}">${i+1}</button>`;
+      }).join('');
+    }
+
+    // Kartı göstər
+    function showCard(idx){
+      const item = ITEMS[idx-1];
+      if(!item) return;
+      card.innerHTML = `<h2>${item.title}</h2>${item.html}`;
+      card.classList.add('active');
+      // aktiv marker vizualı
+      document.querySelectorAll('.pin').forEach(p=>p.classList.remove('active'));
+      const active = document.querySelector(`.pin[data-id="${idx}"]`);
+      if(active) active.classList.add('active');
+      // kart görünsün deyə səhifənin altına yumşaq scroll (mobil UX)
+      card.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+
+    // Hadisələr
+    document.addEventListener('click', (e)=>{
+      const pin = e.target.closest('.pin');
+      if(pin){
+        const id = parseInt(pin.dataset.id, 10);
+        showCard(id);
+      }
+    });
+
+    // Başlat
+    async function init(){
+      fitMapHeight();
+      await ensureImageSize();
+      pctToPx();
+      renderPins();
+      window.addEventListener('resize', ()=>{ fitMapHeight(); renderPins(); });
+      window.addEventListener('orientationchange', ()=>{ fitMapHeight(); renderPins(); });
+    }
+    init();
+  </script>
+</body>
+</html>
