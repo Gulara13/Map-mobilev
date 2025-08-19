@@ -69,6 +69,19 @@
     .footer-note{
       margin-top:10px; font-size:12px; color:var(--muted); text-align:center;
     }
+    /* Edit alətləri (üzən panel) */
+.tools {
+  position: absolute; right: 8px; top: 8px; z-index: 3;
+  display: flex; gap: 6px; align-items: center;
+  background: rgba(255,255,255,.85); border: 1px solid #e5e7eb;
+  border-radius: 999px; padding: 6px 8px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.12);
+}
+.tools .badge { font-size: 12px; color:#374151; }
+.tools .btn { font-size:12px; padding:4px 8px; border:1px solid #e5e7eb; border-radius:999px; background:#fff; }
+
+.pin.edit { cursor: grab; }
+.pin.dragging { cursor: grabbing; }
 
     /* Ekranlara uyğunlaşma: daha kiçik telefonlarda pin ölçüsü azalır */
     @media (max-width:420px){
@@ -103,6 +116,11 @@
 
     <section class="map" id="mapBox">
       <img src="./assets/background.jpg" alt="Xəritə" class="bg" id="bgImg" />
+      <div class="tools" id="tools">
+  <span class="badge" id="modeBadge">Rejim: Baxış</span>
+  <button class="btn" id="toggleEdit">Düzənlə</button>
+  <button class="btn" id="copyCoords">Koordinatları kopyala</button>
+</div>
       <div class="pins" id="pins"></div>
     </section>
 
@@ -143,6 +161,112 @@
     ];
 
     const mapBox = document.getElementById('mapBox');
+    // --- Edit rejimi üçün dəyişənlər
+const tools = document.getElementById('tools');
+const modeBadge = document.getElementById('modeBadge');
+const toggleEditBtn = document.getElementById('toggleEdit');
+const copyCoordsBtn = document.getElementById('copyCoords');
+
+let editMode = (new URLSearchParams(location.search).get('edit') === '1') || localStorage.getItem('editMode') === '1';
+function setModeUI(){
+  modeBadge.textContent = `Rejim: ${editMode ? 'Düzənlə' : 'Baxış'}`;
+  toggleEditBtn.textContent = editMode ? 'Baxış' : 'Düzənlə';
+}
+setModeUI();
+
+// Faiz → px konvertini artıq edirik (səndə var). Tərsinə də lazım olacaq:
+function pxToPercentArr(){
+  // positionsPx -> percent, natural ölçüyə görə
+  return positionsPx.map(p => ({
+    top:  ((p.y / natH) * 100).toFixed(1) + '%',
+    left: ((p.x / natW) * 100).toFixed(1) + '%'
+  }));
+}
+
+// Mövcud renderPins funksiyasını bununla əvəz et:
+function renderPins(){
+  const wrap = mapBox.getBoundingClientRect();
+  const img = bgImg.getBoundingClientRect();
+  const scale = natW ? (img.width / natW) : 1;
+  const offX  = img.left - wrap.left;
+  const offY  = img.top  - wrap.top;
+
+  pinsEl.innerHTML = positionsPx.map((p,i)=>{
+    const x = offX + p.x * scale;
+    const y = offY + p.y * scale;
+    const cls = `pin${editMode ? ' edit' : ''}`;
+    return `<button class="${cls}" style="left:${x}px; top:${y}px" data-idx="${i}" aria-label="Bölmə ${i+1}">${i+1}</button>`;
+  }).join('');
+}
+
+// --- Sürüşdürmə (Pointer Events: touch + mouse)
+let dragging = null;
+
+pinsEl.addEventListener('pointerdown', (e)=>{
+  const pin = e.target.closest('.pin');
+  if(!pin || !editMode) return;
+  dragging = pin;
+  dragging.setPointerCapture(e.pointerId);
+  dragging.classList.add('dragging');
+});
+
+pinsEl.addEventListener('pointermove', (e)=>{
+  if(!dragging || !editMode) return;
+  const wrap = mapBox.getBoundingClientRect();
+  const img = bgImg.getBoundingClientRect();
+  const scale = img.width / natW;
+  const idx = parseInt(dragging.dataset.idx, 10);
+
+  // pointer koordinatı -> şəkil koordinatı (px, natural ölçüyə çevriləcək)
+  const clientX = e.clientX;
+  const clientY = e.clientY;
+  const xOnImg = (clientX - img.left);       // ekranda şəkil üzərində px
+  const yOnImg = (clientY - img.top);
+
+  // Şəkil sərhədlərinə sıx
+  const xClamped = Math.max(0, Math.min(xOnImg, img.width));
+  const yClamped = Math.max(0, Math.min(yOnImg, img.height));
+
+  // natural ölçüyə geri çevir
+  positionsPx[idx] = { x: Math.round(xClamped / scale), y: Math.round(yClamped / scale) };
+
+  // Ekranda canlı tərpənsin deyə düyməni hərəkət etdir
+  dragging.style.left = ( (img.left - wrap.left) + xClamped ) + 'px';
+  dragging.style.top  = ( (img.top  - wrap.top ) + yClamped ) + 'px';
+});
+
+function endDrag(e){
+  if(!dragging) return;
+  dragging.classList.remove('dragging');
+  dragging.releasePointerCapture?.(e.pointerId);
+  dragging = null;
+}
+pinsEl.addEventListener('pointerup', endDrag);
+pinsEl.addEventListener('pointercancel', endDrag);
+
+// --- Toolbar düymələri
+toggleEditBtn.addEventListener('click', ()=>{
+  editMode = !editMode;
+  localStorage.setItem('editMode', editMode ? '1' : '0');
+  setModeUI();
+  renderPins();
+});
+
+copyCoordsBtn.addEventListener('click', async ()=>{
+  const json = JSON.stringify(pxToPercentArr(), null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    copyCoordsBtn.textContent = 'Kopyalandı!';
+    setTimeout(()=> copyCoordsBtn.textContent = 'Koordinatları kopyala', 1200);
+  } catch {
+    // köhnə brauzerlər üçün fallback
+    const ta = document.createElement('textarea');
+    ta.value = json; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    alert('Koordinatlar kopyalandı.');
+  }
+});
+
     const pinsEl = document.getElementById('pins');
     const card = document.getElementById('card');
     const bgImg = document.getElementById('bgImg');
@@ -181,14 +305,14 @@
       });
     }
 
-    // Markerləri çək (contain + ofset + skala)
-    function renderPins(){
-      const wrap = mapBox.getBoundingClientRect();
-      const img = bgImg.getBoundingClientRect();
+    // // Markerləri çək (contain + ofset + skala)
+    // function renderPins(){
+    //   const wrap = mapBox.getBoundingClientRect();
+    //   const img = bgImg.getBoundingClientRect();
 
-      const scale = natW ? (img.width / natW) : 1; // contain üçün eyni
-      const offX  = img.left - wrap.left;
-      const offY  = img.top  - wrap.top;
+    //   const scale = natW ? (img.width / natW) : 1; // contain üçün eyni
+    //   const offX  = img.left - wrap.left;
+    //   const offY  = img.top  - wrap.top;
 
       pinsEl.innerHTML = positionsPx.map((p,i)=>{
         const x = offX + p.x * scale;
@@ -233,3 +357,4 @@
   </script>
 </body>
 </html>
+
